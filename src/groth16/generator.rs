@@ -73,7 +73,13 @@ struct KeypairAssembly<E: Engine> {
     ct_inputs: Vec<Vec<(E::Fr, usize)>>,
     at_aux: Vec<Vec<(E::Fr, usize)>>,
     bt_aux: Vec<Vec<(E::Fr, usize)>>,
-    ct_aux: Vec<Vec<(E::Fr, usize)>>
+    ct_aux: Vec<Vec<(E::Fr, usize)>>,
+    constraints: Vec<(
+        LinearCombination<E>,
+        LinearCombination<E>,
+        LinearCombination<E>,
+        String
+    )>
 }
 
 impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
@@ -121,7 +127,7 @@ impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
 
     fn enforce<A, AR, LA, LB, LC>(
         &mut self,
-        _: A,
+        s: A,
         a: LA,
         b: LB,
         c: LC
@@ -132,13 +138,13 @@ impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
               LC: FnOnce(LinearCombination<E>) -> LinearCombination<E>
     {
         fn eval<E: Engine>(
-            l: LinearCombination<E>,
+            l: &LinearCombination<E>,
             inputs: &mut [Vec<(E::Fr, usize)>],
             aux: &mut [Vec<(E::Fr, usize)>],
             this_constraint: usize
         )
         {
-            for (index, coeff) in l.0 {
+            for (index, coeff) in l.clone().0 {
                 match index {
                     Variable(Index::Input(id)) => inputs[id].push((coeff, this_constraint)),
                     Variable(Index::Aux(id)) => aux[id].push((coeff, this_constraint))
@@ -146,10 +152,15 @@ impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
             }
         }
 
-        eval(a(LinearCombination::zero()), &mut self.at_inputs, &mut self.at_aux, self.num_constraints);
-        eval(b(LinearCombination::zero()), &mut self.bt_inputs, &mut self.bt_aux, self.num_constraints);
-        eval(c(LinearCombination::zero()), &mut self.ct_inputs, &mut self.ct_aux, self.num_constraints);
+        let a = a(LinearCombination::zero());
+        let b = b(LinearCombination::zero());
+        let c = c(LinearCombination::zero());
 
+        eval(&a, &mut self.at_inputs, &mut self.at_aux, self.num_constraints);
+        eval(&b, &mut self.bt_inputs, &mut self.bt_aux, self.num_constraints);
+        eval(&c, &mut self.ct_inputs, &mut self.ct_aux, self.num_constraints);
+
+        self.constraints.push((a, b, c, s().into()));
         self.num_constraints += 1;
     }
 
@@ -166,6 +177,56 @@ impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
 
     fn get_root(&mut self) -> &mut Self::Root {
         self
+    }
+}
+
+impl<E: Engine> KeypairAssembly<E> {
+
+    fn eval_lc(
+        terms: &[(Variable, E::Fr)],
+        inputs: &[Vec<(E::Fr, usize)>],
+        aux: &[Vec<(E::Fr, usize)>]
+    ) -> E::Fr
+    {
+        let mut acc = E::Fr::zero();
+
+        for &(var, ref coeff) in terms.clone().0 {
+            /*let mut tmp = match var.get_unchecked() {
+                Index::Input(index) => inputs[index].0,
+                Index::Aux(index) => aux[index].0
+            };*/
+
+            let mut tmp = match var {
+                Variable(Index::Input(id)) => inputs[id][0],
+                Variable(Index::Aux(id)) => aux[id][0]
+            };
+
+            tmp.mul_assign(&coeff);
+            acc.add_assign(&tmp);
+        }
+
+        acc
+    }
+
+    pub fn which_is_unsatisfied(&self) -> Option<&str> {
+        for &(ref a, ref b, ref c, ref path) in &self.constraints {
+            let mut a = Self::eval_lc(a.as_ref(), &self.at_inputs, &self.at_aux);
+            let b = Self::eval_lc(b.as_ref(), &self.bt_inputs, &self.bt_aux);
+            let c = Self::eval_lc(c.as_ref(), &self.ct_inputs, &self.ct_aux);
+
+            a.mul_assign(&b);
+
+            if a != c {
+                return Some(&*path)
+            }
+        }
+
+        None
+    }
+
+    pub fn is_satisfied(&self) -> bool
+    {
+        self.which_is_unsatisfied().is_none()
     }
 }
 
@@ -191,7 +252,8 @@ pub fn generate_parameters<E, C>(
         ct_inputs: vec![],
         at_aux: vec![],
         bt_aux: vec![],
-        ct_aux: vec![]
+        ct_aux: vec![],
+        constraints: vec![]
     };
 
     // Allocate the "one" input variable

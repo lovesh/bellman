@@ -223,6 +223,7 @@ pub fn create_proof<E, C, P: ParameterSource<E>>(
     prover.alloc_input(|| "", || Ok(E::Fr::one()))?;
 
     circuit.synthesize(&mut prover)?;
+    println!("Total is {}", prover.a.len()+prover.b.len()+prover.c.len());
 
     for i in 0..prover.input_assignment.len() {
         prover.enforce(|| "",
