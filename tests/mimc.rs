@@ -194,21 +194,21 @@ fn test_mimc() {
     println!("Creating proofs...");
 
     // Let's benchmark stuff!
-    const SAMPLES: u32 = 50;
+    const SAMPLES: u32 = 1;
     let mut total_proving = Duration::new(0, 0);
     let mut total_verifying = Duration::new(0, 0);
 
     // Just a place to put the proof data, so we can
     // benchmark deserialization.
-    let mut proof_vec = vec![];
+    let mut proof_vec: Vec<Proof<Bls12>> = vec![];
 
-    for _ in 0..SAMPLES {
+    for k in 0..SAMPLES {
         // Generate a random preimage and compute the image
         let xl = rng.gen();
         let xr = rng.gen();
         let image = mimc::<Bls12>(xl, xr, &constants);
 
-        proof_vec.truncate(0);
+//        proof_vec.truncate(0);
 
         let start = Instant::now();
         {
@@ -222,18 +222,19 @@ fn test_mimc() {
 
             // Create a groth16 proof with our parameters.
             let proof = create_random_proof(c, &params, rng).unwrap();
-
-            proof.write(&mut proof_vec).unwrap();
+            proof_vec.push(proof);
+//            proof.write(&mut proof_vec).unwrap();
         }
 
         total_proving += start.elapsed();
 
         let start = Instant::now();
-        let proof = Proof::read(&proof_vec[..]).unwrap();
+//        let proof = Proof::read(&proof_vec[..]).unwrap();
+        let proof = &proof_vec[k as usize];
         // Check the proof
         assert!(verify_proof(
             &pvk,
-            &proof,
+            proof,
             &[image]
         ).unwrap());
         total_verifying += start.elapsed();
